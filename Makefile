@@ -1,28 +1,37 @@
 
-SRC=src/
-BOOT=isofiles/boot/
+arch ?= x86_64
+kernel := build/kernel-$(arch).bin
+iso := build/os-$(arch).iso
 
-.PHONY: clean run iso
+linker_script := src/arch/$(arch)/linker.ld
+grub_cfg := src/arch/$(arch)/grub.cfg
+assembly_source_files := $(wildcard src/arch/$(arch)/*.asm)
+assembly_object_files := $(patsubst src/arch/$(arch)/%.asm, \
+	build/arch/$(arch)/%.o, $(assembly_source_files))
+
+.PHONY: all clean run iso
+
+all: $(kernel)
 
 clean:
-	@rm os.iso
-	@rm $(BOOT)kernel.bin
-	@rm $(SRC)*.o
+	@rm -r build
 	
+run: $(iso)
+	@qemu-system-x86_64 -cdrom $(iso)
 
-iso: $(BOOT)kernel.bin
-	grub-mkrescue -o os.iso isofiles
+iso: $(iso)
 
-$(BOOT)kernel.bin: $(SRC)boot.o $(SRC)multiboot_header.o
-	ld -nmagic -o $(BOOT)kernel.bin -T $(SRC)linker.ld $(SRC)multiboot_header.o $(SRC)boot.o
+$(iso): $(kernel) $(grub_cfg)
+	@mkdir -p build/isofiles/boot/grub
+	@cp $(kernel) build/isofiles/boot/kernel.bin
+	@cp $(grub_cfg) build/isofiles/boot/grub
+	@grub-mkrescue -o $(iso) build/isofiles 2> /dev/null
+	@rm -r build/isofiles
 
-$(SRC)multiboot_header.o: $(SRC)multiboot_header.asm
-	nasm -f elf64 $(SRC)multiboot_header.asm
+$(kernel): $(assembly_object_files) $(linker_script)
+	ld -nmagic -o $(kernel) -T $(linker_script) $(assembly_object_files)
 
-$(SRC)boot.o: $(SRC)boot.asm
-	nasm -f elf64 $(SRC)boot.asm
-
-run: iso
-	qemu-system-x86_64 -cdrom os.iso
-
-
+# compile assembly step
+build/arch/$(arch)/%.o: src/arch/$(arch)/%.asm
+	@mkdir -p $(shell dirname $@)
+	@nasm -f elf64 $< -o $@
